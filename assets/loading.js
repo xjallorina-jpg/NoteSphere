@@ -1,0 +1,2 @@
+window.addEventListener('load', function(){});
+document.addEventListener('click', function(e){ if(e.target && (e.target.tagName==='A' || e.target.tagName==='BUTTON')){ var o=document.createElement('div'); o.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:99999;color:#fff;font-size:18px;'; o.textContent='Loading...'; document.body.appendChild(o); setTimeout(function(){o.remove();},3000);} });

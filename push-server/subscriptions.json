@@ -1,0 +1,22 @@
+[
+  {
+    "endpoint": "https://fcm.googleapis.com/fcm/send/ci7rMWNh_T4:APA91bFSGBOLYVJUxDX-9LF_wlkzXGjLv_Q1uYfqKg7BhwIcoQFOwpNb7eMJlzUzwyftuIcydvjjPueaZ0v5I_p1LXF9xkwnaNzZjGOW5c0XpiSOkjuuliiOvDy91PGBjprA30tBqiyc",
+    "keys": {
+      "p256dh": "BPcz7dHrKW26Z3XhwsU-UxsTm1oz0MvylDYqglD-_XGZgbrjQhioFdQajX3P92C0d5qNcHnAiAglDxcXA82rNqk",
+      "auth": "h02efQnfRPdA2AqWeIC-Ng"
+    },
+    "user": 3,
+    "createdAt": "2026-11-23T10:05:57.929Z",
+    "updatedAt": "2026-11-23T10:05:57.929Z"
+  },
+  {
+    "endpoint": "https://fcm.googleapis.com/fcm/send/fBhoqnOqLHQ:APA91bG5VOcmD00hLHgEzlnXDOwFoGePwifDOkFhsBYU44YOLVXZYrDQdQEE9ZdopZAWhVXMJQIJ8Y3rc2hDqyu-KB2Lw-BWTHdd7s-hRmJz-cydl5b5o7ccjIayO8Bu7zkq2UP75s1I",
+    "keys": {
+      "p256dh": "BBOYxM7SRc64QF3L2zMUnRCEGsYWOEKyRHWK67t0Swg0WqFo3w_YLZ89IVNCaePzNeUEa86g8AKd2mpbfCwYXO4",
+      "auth": "UTb8yy8B6aTaWUcbkjkZdQ"
+    },
+    "user": 2,
+    "createdAt": "2026-11-23T10:06:50.058Z",
+    "updatedAt": "2026-11-23T10:06:50.058Z"
+  }
+]

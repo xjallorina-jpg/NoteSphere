@@ -1,0 +1,30 @@
+# Secrets / local config
+includes/mail_config.php
+includes/db_config.php
+.env
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+vendor/
+
+# User uploads (keep folder structure)
+uploads/*
+!uploads/.gitkeep
+
+# OS / editor
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Logs / temp
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local helper scripts
+start_server.bat

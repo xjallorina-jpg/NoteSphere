@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="NoteSphere vivid icon">
+  <defs>
+    <radialGradient id="bg" cx="30%" cy="25%" r="80%">
+      <stop offset="0" stop-color="#ff6b9d"/>
+      <stop offset="0.45" stop-color="#a855f7"/>
+      <stop offset="1" stop-color="#0ea5e9"/>
+    </radialGradient>
+    <linearGradient id="card" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f1f5f9"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="14" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="160%">
+      <feDropShadow dx="0" dy="12" stdDeviation="18" flood-color="#000" flood-opacity="0.3"/>
+    </filter>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="url(#bg)"/>
+  <g filter="url(#sh)">
+    <rect x="108" y="118" width="296" height="276" rx="40" fill="url(#card)" transform="rotate(-6 256 256)"/>
+    <rect x="128" y="138" width="296" height="276" rx="40" fill="url(#card)"/>
+  </g>
+  <g filter="url(#glow)">
+    <circle cx="300" cy="240" r="78" fill="#facc15"/>
+    <path d="M268 240 l22 22 l42 -46" stroke="#1e1b4b" stroke-width="14" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </g>
+  <path d="M160 300 h90 M160 336 h60" stroke="#94a3b8" stroke-width="12" stroke-linecap="round"/>
+  <path d="M160 200 l24 -24 16 16 30 -34" stroke="#a855f7" stroke-width="10" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+</svg>
