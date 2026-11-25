@@ -52,7 +52,7 @@ if (!$note) { die("Note not found!"); }
         <p><strong>Uploader:</strong> <?= htmlspecialchars($note['uploader']) ?></p>
         <p><strong>Description:</strong><br> <?= htmlspecialchars($note['description']) ?></p>
         
-        <a href="../uploads/<?= htmlspecialchars($note['file_path']) ?>" target="_blank" class="btn btn-view">VIEW ATTACHED DOCUMENT</a>
+        <a href="<?= htmlspecialchars(ns_media_url($note['file_path'])) ?>" target="_blank" class="btn btn-view">VIEW ATTACHED DOCUMENT</a>
         
         <div class="action-row">
             <a href="admin_dashboard.php?approve=<?= $note['id'] ?>" class="btn btn-app">APPROVE</a>

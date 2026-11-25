@@ -73,6 +73,23 @@ if (!$note) {
     exit('Note not found.');
 }
 
+// Cloudinary files are remote HTTPS URLs; redirect instead of reading a local
+// file that does not exist on Vercel.
+$storedFilePath = trim((string)($note['file_path'] ?? ''));
+
+if (ns_is_remote_file($storedFilePath)) {
+    $remoteUrl = ns_validate_cloudinary_url($storedFilePath);
+
+    if ($remoteUrl === null) {
+        http_response_code(404);
+        exit('The note file could not be found on the server.');
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('Location: ' . $remoteUrl, true, 302);
+    exit;
+}
+
 // =========================================================
 // FIND ACTUAL FILE
 // =========================================================

@@ -1,0 +1,12 @@
+# Files that must never be uploaded with the Vercel deployment.
+uploads/
+.git/
+.vercel/
+node_modules/
+vendor/
+push-server/
+database/*.sql
+*.log
+.env
+.env.local
+includes/certs/*.pem

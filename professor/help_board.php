@@ -281,7 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             'url' => '/NoteSphere/dashboard/help_board.php#comment-' . $comment_id,
                             'user_ids' => [$post_owner_id]
                         ]);
-                        $ch = curl_init('http://127.0.0.1:4000/notify');
+                        $ch = curl_init(ns_push_server_url('notify'));
                         if ($ch !== false) {
                             curl_setopt($ch, CURLOPT_POST, true);
                             curl_setopt($ch, CURLOPT_POSTFIELDS, $pushPayload);

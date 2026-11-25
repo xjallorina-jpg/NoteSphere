@@ -1,25 +1,7 @@
 <?php
-session_start();
+require_once __DIR__ . '/../includes/db_config.php';
 
-// Database Connection
-$host = 'localhost';
-$db   = '1notesphere_db';
-$user = 'root';
-$pass = '';
-$charset = 'utf8mb4';
-
-$dsn = "mysql:host=$host;dbname=$db;charset=$charset";
-$options = [
-    PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-    PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-    PDO::ATTR_EMULATE_PREPARES   => false,
-];
-
-try {
-    $pdo = new PDO($dsn, $user, $pass, $options);
-} catch (\PDOException $e) {
-    die("Database Connection Failed: " . $e->getMessage());
-}
+/** @var PDO $pdo */
 
 // Redirect if not logged in
 if (!isset($_SESSION['user_id'])) {
@@ -47,28 +29,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $file_path = '';
             $thumbnail_name = '';
 
-            if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
-                $thumb_tmp = $_FILES['thumbnail']['tmp_name'];
+            $cloudFile = ns_cloud_upload_from_request('note_file');
+            $cloudThumb = ns_cloud_upload_from_request('thumbnail');
+
+            if ($cloudThumb !== null) {
+                $thumbnail_name = $cloudThumb['path'];
+            } elseif (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
                 $thumb_ext = strtolower(pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION));
                 $allowed_img = ['jpg', 'jpeg', 'png', 'webp'];
-                
+
                 if (in_array($thumb_ext, $allowed_img)) {
-                    $thumbnail_name = 'thumb_' . uniqid() . '.' . $thumb_ext;
-                    move_uploaded_file($thumb_tmp, '../uploads/' . $thumbnail_name);
+                    $thumbnail_name = ns_store_uploaded_file($_FILES['thumbnail'], 'notes/thumbnails')['path'];
                 }
             }
 
             if ($submission_type === 'upload') {
-                if (isset($_FILES['note_file']) && $_FILES['note_file']['error'] === UPLOAD_ERR_OK) {
-                    $file_tmp = $_FILES['note_file']['tmp_name'];
-                    $file_name = $_FILES['note_file']['name'];
-                    $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
-                    $allowed_files = ['pdf', 'docx', 'doc', 'ppt', 'pptx', 'txt', 'zip'];
+                $allowed_files = ['pdf', 'docx', 'doc', 'ppt', 'pptx', 'txt', 'zip'];
+
+                if ($cloudFile !== null) {
+                    $file_ext = strtolower(pathinfo($cloudFile['name'], PATHINFO_EXTENSION));
 
                     if (in_array($file_ext, $allowed_files)) {
-                        $file_path = 'note_' . uniqid() . '.' . $file_ext;
-                        if (!move_uploaded_file($file_tmp, '../uploads/' . $file_path)) {
-                            $upload_error = "Failed to move uploaded file.";
+                        $file_path = $cloudFile['path'];
+                    } else {
+                        $upload_error = "Invalid file format. Allowed extensions: PDF, DOCX, PPT, TXT, ZIP.";
+                    }
+                } elseif (isset($_FILES['note_file']) && $_FILES['note_file']['error'] === UPLOAD_ERR_OK) {
+                    $file_name = $_FILES['note_file']['name'];
+                    $file_ext = strtolower(pathinfo($file_name, PATHINFO_EXTENSION));
+
+                    if (in_array($file_ext, $allowed_files)) {
+                        try {
+                            $file_path = ns_store_uploaded_file($_FILES['note_file'], 'notes')['path'];
+                        } catch (Throwable $e) {
+                            $upload_error = $e->getMessage();
                         }
                     } else {
                         $upload_error = "Invalid file format. Allowed extensions: PDF, DOCX, PPT, TXT, ZIP.";
@@ -79,8 +73,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $note_content = $_POST['note_content'] ?? '';
                 if (!empty($note_content)) {
-                    $file_path = 'written_' . uniqid() . '.txt';
-                    file_put_contents('../uploads/' . $file_path, $note_content);
+                    try {
+                        $file_path = ns_store_text_file(
+                            $note_content,
+                            'written_' . uniqid() . '.txt',
+                            'notes'
+                        );
+                    } catch (Throwable $e) {
+                        $upload_error = $e->getMessage();
+                    }
                 } else {
                     $upload_error = "Note content cannot be empty.";
                 }
@@ -486,9 +487,9 @@ $my_uploads = $history_stmt->fetchAll();
             <?php if (count($notes) > 0): ?>
                 <div class="grid-container">
                     <?php foreach($notes as $row): 
-                        $file_path = '../uploads/' . htmlspecialchars($row['file_path']);
+                        $file_path = htmlspecialchars(ns_media_url($row['file_path']));
                         $ext = strtoupper(pathinfo($row['file_path'], PATHINFO_EXTENSION));
-                        $thumbPath = (!empty($row['thumbnail'])) ? '../uploads/' . $row['thumbnail'] : '../assets/default_thumb.png';
+                        $thumbPath = (!empty($row['thumbnail'])) ? ns_media_url($row['thumbnail']) : '../assets/default_thumb.png';
                         $avg_rating = number_format($row['avg_rating'], 1);
                         $total_ratings = $row['total_ratings'];
                         $post_date = date('M d, Y • h:i A', strtotime($row['created_at']));
@@ -553,7 +554,7 @@ $my_uploads = $history_stmt->fetchAll();
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px;">
                             <span class="status-badge <?php echo $status_class; ?>"><?php echo $status_text; ?></span>
                             <?php if (!empty($item['file_path'])): ?>
-                                <a href="../uploads/<?php echo htmlspecialchars($item['file_path']); ?>" target="_blank" style="color: var(--neon); text-decoration: none; font-size: 0.8rem; font-weight: 700;">View File →</a>
+                                <a href="<?php echo htmlspecialchars(ns_media_url($item['file_path'])); ?>" target="_blank" style="color: var(--neon); text-decoration: none; font-size: 0.8rem; font-weight: 700;">View File →</a>
                             <?php endif; ?>
                         </div>
                     </div>

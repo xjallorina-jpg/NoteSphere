@@ -392,7 +392,7 @@ $total_sections = count($grouped_submissions);
                                         </p>
 
                                         <div style="margin-bottom: 20px;">
-                                            <a href="../uploads/<?= htmlspecialchars($sub['file_path']); ?>" target="_blank" class="download-btn">
+                                            <a href="<?= htmlspecialchars(ns_media_url($sub['file_path'])); ?>" target="_blank" class="download-btn">
                                                 📥 I-download ang File ng Estudyante
                                             </a>
                                         </div>

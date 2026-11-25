@@ -142,6 +142,35 @@ if ($request_id > 0) {
 }
 
 // =========================================================
+// CLOUDINARY FILES
+// =========================================================
+
+// Cloudinary stores files as public HTTPS URLs. Redirect to the validated URL
+// instead of searching the local filesystem (which is read-only on Vercel).
+$remote_source = '';
+
+if (ns_is_remote_file($database_file_path)) {
+    $remote_source = $database_file_path;
+} elseif (ns_is_remote_file($request_path)) {
+    $remote_source = $request_path;
+} elseif (ns_is_remote_file($request_file)) {
+    $remote_source = $request_file;
+}
+
+if ($remote_source !== '') {
+    $remote_url = ns_validate_cloudinary_url($remote_source);
+
+    if ($remote_url === null) {
+        http_response_code(404);
+        exit('Not found');
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('Location: ' . $remote_url, true, 302);
+    exit;
+}
+
+// =========================================================
 // FILE SEARCH FUNCTION
 // =========================================================
 

@@ -1,41 +1,31 @@
 <?php
 /**
- * NoteSphere Database Configuration
- * Database: 1notesphere_db
+ * NoteSphere Database Configuration - example
  *
- * Copy this file to db_config.php and update values for your environment.
+ * The real includes/db_config.php now reads environment variables, so this
+ * file is only documentation. Copy .env.example to .env for local development,
+ * or add the same variables in the Vercel project settings.
+ *
+ * Required variables:
+ *
+ *   DB_HOST=notesphere-xjallorina-16dc.g.aivencloud.com
+ *   DB_PORT=27295
+ *   DB_NAME=defaultdb
+ *   DB_USER=avnadmin
+ *   DB_PASS=your-aiven-password
+ *
+ * Optional variables:
+ *
+ *   DB_SSL=1
+ *   DB_SSL_CA=/absolute/path/to/ca.pem
+ *   DB_SSL_CA_PEM="-----BEGIN CERTIFICATE-----..."
+ *   DB_SSL_VERIFY=1
+ *   DB_SESSIONS=1
+ *   APP_TIMEZONE=Asia/Manila
  */
 
 if (!defined('NOTESPHERE_DB_CONFIG_LOADED')) {
     define('NOTESPHERE_DB_CONFIG_LOADED', true);
 
-    if (session_status() === PHP_SESSION_NONE) {
-        session_start();
-    }
-
-    $host = 'localhost';
-    $dbname = '1notesphere_db';
-    $username = 'root';
-    $password = ''; // Default XAMPP password is often empty.
-
-    $dsn = "mysql:host={$host};dbname={$dbname};charset=utf8mb4";
-
-    try {
-        $conn = new PDO($dsn, $username, $password, [
-            PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-            PDO::ATTR_EMULATE_PREPARES   => false,
-        ]);
-    } catch (PDOException $e) {
-        error_log(
-            'NoteSphere database connection failed: '
-            . $e->getMessage()
-        );
-
-        http_response_code(500);
-        exit(
-            'Unable to connect to the NoteSphere database. '
-            . 'Please check the database configuration.'
-        );
-    }
+    require_once __DIR__ . '/db_config.php';
 }

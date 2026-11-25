@@ -80,6 +80,35 @@ function nsMsgAttachmentKind(string $mime, string $ext): ?string {
     if (in_array($ext, $allowedExts, true) && (in_array($mime, $docs, true) || $mime === 'application/octet-stream')) return 'file';
     return null;
 }
+/**
+ * Normalize an attachment from either a direct Cloudinary upload (Vercel) or a
+ * traditional PHP file upload (local XAMPP).
+ */
+function nsMsgIncomingAttachment(): array {
+    $cloud = ns_cloud_upload_from_request('attachment');
+    if ($cloud !== null) {
+        return [
+            'name' => (string)$cloud['name'],
+            'size' => (int)$cloud['size'],
+            'mime' => (string)$cloud['mime'],
+            'tmp_name' => '',
+            'error' => UPLOAD_ERR_OK,
+            'cloud_url' => (string)$cloud['path'],
+        ];
+    }
+    $file = $_FILES['attachment'] ?? null;
+    if (!is_array($file)) {
+        return ['name'=>'','size'=>0,'mime'=>'','tmp_name'=>'','error'=>UPLOAD_ERR_NO_FILE,'cloud_url'=>''];
+    }
+    return [
+        'name' => (string)($file['name'] ?? ''),
+        'size' => (int)($file['size'] ?? 0),
+        'mime' => (string)($file['type'] ?? ''),
+        'tmp_name' => (string)($file['tmp_name'] ?? ''),
+        'error' => (int)($file['error'] ?? UPLOAD_ERR_NO_FILE),
+        'cloud_url' => '',
+    ];
+}
 function nsMsgResolveStoredPath(string $relativePath, string $projectRoot): ?string {
     $relativePath = str_replace('\\', '/', trim($relativePath));
     if ($relativePath === '' || str_starts_with($relativePath, '/') || preg_match('/^[A-Za-z]:/', $relativePath)) return null;
@@ -192,7 +221,17 @@ try {
         }
         $row = $st->fetch(PDO::FETCH_ASSOC);
         if (!$row || empty($row['file_path'])) { http_response_code(404); exit('Attachment not found.'); }
-        $absolutePath = nsMsgResolveStoredPath((string)$row['file_path'], $projectRoot);
+        $storedPath = (string)$row['file_path'];
+        // Cloudinary assets are public HTTPS URLs: redirect instead of reading
+        // a file that does not exist on the Vercel filesystem.
+        if (ns_is_remote_file($storedPath)) {
+            $remoteUrl = ns_validate_cloudinary_url($storedPath);
+            if ($remoteUrl === null) { http_response_code(404); exit('Attachment file is not available.'); }
+            header('X-Content-Type-Options: nosniff');
+            header('Location: ' . $remoteUrl, true, 302);
+            exit;
+        }
+        $absolutePath = nsMsgResolveStoredPath($storedPath, $projectRoot);
         if (!$absolutePath) { http_response_code(404); exit('Attachment file is not available.'); }
         $mime = (string)($row['file_mime'] ?: 'application/octet-stream');
         $name = nsMsgSafeFilename((string)($row['file_name'] ?: basename((string)$row['file_path'])));
@@ -322,13 +361,14 @@ try {
             $groupId=(int)($_POST['group_id']??0);$caption=trim((string)($_POST['message']??''));
             $st=$conn->prepare('SELECT 1 FROM `message_group_members` WHERE `group_id`=? AND `user_id`=? LIMIT 1');$st->execute([$groupId,$currentUserId]);
             if($groupId<1||!$st->fetchColumn())nsMsgJson(['ok'=>false,'error'=>'You are not a member of this group.'],403);
-            if(!isset($_FILES['attachment'])||!is_array($_FILES['attachment']))nsMsgJson(['ok'=>false,'error'=>'Choose a photo, voice recording, or file first.'],422);
-            $file=$_FILES['attachment'];$uploadError=(int)($file['error']??UPLOAD_ERR_NO_FILE);
+            $file=nsMsgIncomingAttachment();$uploadError=(int)($file['error']??UPLOAD_ERR_NO_FILE);
             if($uploadError!==UPLOAD_ERR_OK){$errors=[UPLOAD_ERR_INI_SIZE=>'The file exceeds PHP upload_max_filesize. Increase upload_max_filesize and post_max_size in PHP settings.',UPLOAD_ERR_FORM_SIZE=>'The selected file is too large.',UPLOAD_ERR_PARTIAL=>'The upload was interrupted.',UPLOAD_ERR_NO_FILE=>'Choose a file first.',UPLOAD_ERR_NO_TMP_DIR=>'The server temporary folder is missing.',UPLOAD_ERR_CANT_WRITE=>'The server could not write the uploaded file.',UPLOAD_ERR_EXTENSION=>'PHP blocked this file upload.'];nsMsgJson(['ok'=>false,'error'=>$errors[$uploadError]??'Upload failed.'],422);}
-            $size=(int)($file['size']??0);if($size<1||empty($file['tmp_name'])||!is_uploaded_file((string)$file['tmp_name']))nsMsgJson(['ok'=>false,'error'=>'The uploaded file is invalid or empty.'],422);
+            $size=(int)($file['size']??0);if($size<1||(empty($file['cloud_url'])&&(empty($file['tmp_name'])||!is_uploaded_file((string)$file['tmp_name']))))nsMsgJson(['ok'=>false,'error'=>'The uploaded file is invalid or empty.'],422);
             if($size > 1024*1024*1024)nsMsgJson(['ok'=>false,'error'=>'File too large. Max 1 GB per file.'],413);
             if(nsMsgLength($caption)>5000)nsMsgJson(['ok'=>false,'error'=>'Captions must be 5,000 characters or fewer.'],422);
-            $originalName=nsMsgSafeFilename((string)($file['name']??'attachment'));$ext=strtolower(pathinfo($originalName,PATHINFO_EXTENSION));$finfo=new finfo(FILEINFO_MIME_TYPE);$mime=(string)$finfo->file((string)$file['tmp_name']);$kind=nsMsgAttachmentKind($mime,$ext);
+            $originalName=nsMsgSafeFilename((string)($file['name']??'attachment'));$ext=strtolower(pathinfo($originalName,PATHINFO_EXTENSION));
+            $mime=(string)($file['mime']??'');if($mime===''&&!empty($file['tmp_name'])){$finfo=new finfo(FILEINFO_MIME_TYPE);$mime=(string)$finfo->file((string)$file['tmp_name']);}if($mime==='')$mime='application/octet-stream';
+            $kind=nsMsgAttachmentKind($mime,$ext);
             if($kind===null)nsMsgJson(['ok'=>false,'error'=>'Unsupported file type. Allowed: images, audio/voice, video, PDF, Office documents, TXT, and ZIP.'],422);
             $storageHelper=$projectRoot.DIRECTORY_SEPARATOR.'storage_helper.php';if(is_file($storageHelper))require_once $storageHelper;
             if(!function_exists('ns_get_user_storage')||!function_exists('ns_get_system_storage'))nsMsgJson(['ok'=>false,'error'=>'Storage validation is not configured.'],500);
@@ -336,12 +376,16 @@ try {
                 if($quota<1||$used+$size>$quota)nsMsgJson(['ok'=>false,'error'=>'Not enough personal storage. Used: '.nsMsgBytes($used).'; quota: '.nsMsgBytes($quota).'.'],413);
                 if($total<1||$systemUsed+$size>$total)nsMsgJson(['ok'=>false,'error'=>'System storage is full or has no valid limit. Contact the Admin.'],413);
             }catch(Throwable $e){error_log('NoteSphere group attachment storage check: '.$e->getMessage());nsMsgJson(['ok'=>false,'error'=>'Could not verify storage limits. Upload stopped.'],500);}
-            $uploadDir=$projectRoot.DIRECTORY_SEPARATOR.'uploads'.DIRECTORY_SEPARATOR.'messages'.DIRECTORY_SEPARATOR.$currentUserId;
-            if(!is_dir($uploadDir)&&!mkdir($uploadDir,0750,true)&&!is_dir($uploadDir))nsMsgJson(['ok'=>false,'error'=>'Could not create the message upload folder.'],500);
-            $storedName=bin2hex(random_bytes(18)).'.'.($ext!==''?$ext:'bin');$absolutePath=$uploadDir.DIRECTORY_SEPARATOR.$storedName;
-            if(!move_uploaded_file((string)$file['tmp_name'],$absolutePath))nsMsgJson(['ok'=>false,'error'=>'Could not save the uploaded attachment.'],500);
-            $relativePath='uploads/messages/'.$currentUserId.'/'.$storedName;
-            try{$st=$conn->prepare('INSERT INTO `message_group_messages` (`group_id`,`sender_id`,`message`,`file_path`,`file_type`,`message_type`,`file_name`,`file_mime`,`file_size`) VALUES (?,?,?,?,?,?,?,?,?)');$st->execute([$groupId,$currentUserId,$caption,$relativePath,$kind,$kind,$originalName,$mime,$size]);$messageId=(int)$conn->lastInsertId();$conn->prepare('UPDATE `message_groups` SET `updated_at`=CURRENT_TIMESTAMP WHERE `group_id`=?')->execute([$groupId]);}catch(Throwable $e){@unlink($absolutePath);throw $e;}
+            if(!empty($file['cloud_url'])){
+                $relativePath=(string)$file['cloud_url'];$absolutePath='';
+            }else{
+                $uploadDir=$projectRoot.DIRECTORY_SEPARATOR.'uploads'.DIRECTORY_SEPARATOR.'messages'.DIRECTORY_SEPARATOR.$currentUserId;
+                if(!is_dir($uploadDir)&&!mkdir($uploadDir,0750,true)&&!is_dir($uploadDir))nsMsgJson(['ok'=>false,'error'=>'Could not create the message upload folder.'],500);
+                $storedName=bin2hex(random_bytes(18)).'.'.($ext!==''?$ext:'bin');$absolutePath=$uploadDir.DIRECTORY_SEPARATOR.$storedName;
+                if(!move_uploaded_file((string)$file['tmp_name'],$absolutePath))nsMsgJson(['ok'=>false,'error'=>'Could not save the uploaded attachment.'],500);
+                $relativePath='uploads/messages/'.$currentUserId.'/'.$storedName;
+            }
+            try{$st=$conn->prepare('INSERT INTO `message_group_messages` (`group_id`,`sender_id`,`message`,`file_path`,`file_type`,`message_type`,`file_name`,`file_mime`,`file_size`) VALUES (?,?,?,?,?,?,?,?,?)');$st->execute([$groupId,$currentUserId,$caption,$relativePath,$kind,$kind,$originalName,$mime,$size]);$messageId=(int)$conn->lastInsertId();$conn->prepare('UPDATE `message_groups` SET `updated_at`=CURRENT_TIMESTAMP WHERE `group_id`=?')->execute([$groupId]);}catch(Throwable $e){if($absolutePath!=='')@unlink($absolutePath);throw $e;}
             nsMsgJson(['ok'=>true,'message_id'=>$messageId,'message'=>'Group attachment sent.']);
         }
         if ($action === 'get_group_messages') {
@@ -377,8 +421,7 @@ try {
             if ($peerId < 1 || $peerId === $currentUserId) nsMsgJson(['ok'=>false,'error'=>'Choose a valid recipient.'], 422);
             $st = $conn->prepare('SELECT 1 FROM `users` WHERE `' . $idCol . '`=? LIMIT 1'); $st->execute([$peerId]);
             if (!$st->fetchColumn()) nsMsgJson(['ok'=>false,'error'=>'Recipient not found.'], 404);
-            if (!isset($_FILES['attachment']) || !is_array($_FILES['attachment'])) nsMsgJson(['ok'=>false,'error'=>'Choose a photo, voice recording, or file first.'], 422);
-            $file = $_FILES['attachment'];
+            $file = nsMsgIncomingAttachment();
             $uploadError = (int)($file['error'] ?? UPLOAD_ERR_NO_FILE);
             if ($uploadError !== UPLOAD_ERR_OK) {
                 $errors = [
@@ -390,13 +433,14 @@ try {
                 nsMsgJson(['ok'=>false,'error'=>$errors[$uploadError] ?? 'Upload failed.'], 422);
             }
             $size = (int)($file['size'] ?? 0);
-            if ($size < 1 || empty($file['tmp_name']) || !is_uploaded_file((string)$file['tmp_name'])) nsMsgJson(['ok'=>false,'error'=>'The uploaded file is invalid or empty.'], 422);
+            if ($size < 1 || (empty($file['cloud_url']) && (empty($file['tmp_name']) || !is_uploaded_file((string)$file['tmp_name'])))) nsMsgJson(['ok'=>false,'error'=>'The uploaded file is invalid or empty.'], 422);
             if ($size > 1024 * 1024 * 1024) nsMsgJson(['ok'=>false,'error'=>'File too large. Max 1 GB per file.'], 413);
             if (nsMsgLength($caption) > 5000) nsMsgJson(['ok'=>false,'error'=>'Captions must be 5,000 characters or fewer.'], 422);
             $originalName = nsMsgSafeFilename((string)($file['name'] ?? 'attachment'));
             $ext = strtolower(pathinfo($originalName, PATHINFO_EXTENSION));
-            $finfo = new finfo(FILEINFO_MIME_TYPE);
-            $mime = (string)$finfo->file((string)$file['tmp_name']);
+            $mime = (string)($file['mime'] ?? '');
+            if ($mime === '' && !empty($file['tmp_name'])) { $finfo = new finfo(FILEINFO_MIME_TYPE); $mime = (string)$finfo->file((string)$file['tmp_name']); }
+            if ($mime === '') $mime = 'application/octet-stream';
             $kind = nsMsgAttachmentKind($mime, $ext);
             if ($kind === null) nsMsgJson(['ok'=>false,'error'=>'Unsupported file type. Allowed: images, audio/voice, video, PDF, Office documents, TXT, and ZIP.'], 422);
 
@@ -432,18 +476,23 @@ try {
                 nsMsgJson(['ok'=>false,'error'=>'Could not verify the current storage limits. The upload was stopped. Check the Admin storage settings and storage_helper.php.'], 500);
             }
 
-            $uploadDir = $projectRoot . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'messages' . DIRECTORY_SEPARATOR . $currentUserId;
-            if (!is_dir($uploadDir) && !mkdir($uploadDir, 0750, true) && !is_dir($uploadDir)) nsMsgJson(['ok'=>false,'error'=>'Could not create the message upload folder.'], 500);
-            $storedName = bin2hex(random_bytes(18)) . '.' . ($ext !== '' ? $ext : 'bin');
-            $absolutePath = $uploadDir . DIRECTORY_SEPARATOR . $storedName;
-            if (!move_uploaded_file((string)$file['tmp_name'], $absolutePath)) nsMsgJson(['ok'=>false,'error'=>'Could not save the uploaded attachment.'], 500);
-            $relativePath = 'uploads/messages/' . $currentUserId . '/' . $storedName;
+            if (!empty($file['cloud_url'])) {
+                $relativePath = (string)$file['cloud_url'];
+                $absolutePath = '';
+            } else {
+                $uploadDir = $projectRoot . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR . 'messages' . DIRECTORY_SEPARATOR . $currentUserId;
+                if (!is_dir($uploadDir) && !mkdir($uploadDir, 0750, true) && !is_dir($uploadDir)) nsMsgJson(['ok'=>false,'error'=>'Could not create the message upload folder.'], 500);
+                $storedName = bin2hex(random_bytes(18)) . '.' . ($ext !== '' ? $ext : 'bin');
+                $absolutePath = $uploadDir . DIRECTORY_SEPARATOR . $storedName;
+                if (!move_uploaded_file((string)$file['tmp_name'], $absolutePath)) nsMsgJson(['ok'=>false,'error'=>'Could not save the uploaded attachment.'], 500);
+                $relativePath = 'uploads/messages/' . $currentUserId . '/' . $storedName;
+            }
             try {
                 $st = $conn->prepare('INSERT INTO `messages` (`sender_id`,`receiver_id`,`message`,`file_path`,`file_type`,`message_type`,`file_name`,`file_mime`,`file_size`) VALUES (?,?,?,?,?,?,?,?,?)');
                 $st->execute([$currentUserId,$peerId,$caption,$relativePath,$kind,$kind,$originalName,$mime,$size]);
                 $messageId = (int)$conn->lastInsertId();
             } catch (Throwable $saveError) {
-                @unlink($absolutePath);
+                if ($absolutePath !== '') @unlink($absolutePath);
                 throw $saveError;
             }
             nsMsgJson(['ok'=>true,'message_id'=>$messageId,'message'=>'Attachment sent.']);
@@ -1065,5 +1114,6 @@ html.ns-messenger-dark .messages-area.theme-sand{--chat-bg:#29251a;--bubble-out:
   window.setInterval(loadConversations,10000);
 })();
 </script>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 </html>

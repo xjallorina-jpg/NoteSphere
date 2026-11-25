@@ -330,6 +330,23 @@ if ($storedFilePath === '') {
     );
 }
 
+// Cloudinary files are remote HTTPS URLs. Send the browser to the validated
+// URL instead of looking for a local file that does not exist on Vercel.
+if (ns_is_remote_file($storedFilePath)) {
+    $remoteUrl = ns_validate_cloudinary_url($storedFilePath);
+
+    if ($remoteUrl === null) {
+        sendErrorPage(
+            'Invalid Attachment',
+            'The attached file is not available.'
+        );
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('Location: ' . $remoteUrl, true, 302);
+    exit;
+}
+
 
 // =========================================================
 // PROJECT ROOT

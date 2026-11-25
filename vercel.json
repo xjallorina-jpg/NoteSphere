@@ -1,0 +1,23 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "version": 2,
+  "builds": [
+    {
+      "src": "api/index.php",
+      "use": "vercel-php@0.9.0"
+    }
+  ],
+  "routes": [
+    {
+      "src": "^/$",
+      "dest": "/api/index.php?ns_path=portal.php"
+    },
+    {
+      "src": "^/(?<nsfile>.+\\.php)$",
+      "dest": "/api/index.php?ns_path=$nsfile"
+    },
+    {
+      "handle": "filesystem"
+    }
+  ]
+}

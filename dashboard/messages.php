@@ -52,16 +52,24 @@ function uploadChatFile(): array
         'file_type' => null
     ];
 
-    if (
-        !isset($_FILES['chat_file']) ||
-        $_FILES['chat_file']['error'] !== UPLOAD_ERR_OK
-    ) {
+    // The browser may already have uploaded the file to Cloudinary (Vercel),
+    // or the file may still arrive as a normal $_FILES entry (local XAMPP).
+    $cloud = ns_cloud_upload_from_request('chat_file');
+    $local = $_FILES['chat_file'] ?? null;
+    $hasLocal = is_array($local)
+        && (int) ($local['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
+
+    if ($cloud === null && !$hasLocal) {
         return $result;
     }
 
-    $file_tmp  = $_FILES['chat_file']['tmp_name'];
-    $file_name = $_FILES['chat_file']['name'];
-    $file_size = (int) $_FILES['chat_file']['size'];
+    $file_name = $cloud !== null
+        ? (string) $cloud['name']
+        : (string) ($local['name'] ?? '');
+
+    $file_size = $cloud !== null
+        ? (int) $cloud['size']
+        : (int) ($local['size'] ?? 0);
 
     // Maximum file size: 25 MB
     $max_size = 25 * 1024 * 1024;
@@ -100,32 +108,38 @@ function uploadChatFile(): array
         return $result;
     }
 
-    // Create upload directory
-    $upload_dir = __DIR__ . '/../uploads/messages/';
+    if ($cloud !== null) {
+        $stored_path = (string) $cloud['path'];
+    } else {
+        // Create upload directory
+        $upload_dir = __DIR__ . '/../uploads/messages/';
 
-    if (!is_dir($upload_dir)) {
-        if (!mkdir($upload_dir, 0777, true)) {
+        if (!is_dir($upload_dir)) {
+            if (!mkdir($upload_dir, 0777, true)) {
+                return $result;
+            }
+        }
+
+        // Generate safer unique filename
+        $safe_name = preg_replace(
+            '/[^A-Za-z0-9._-]/',
+            '_',
+            basename($file_name)
+        );
+
+        $unique_name = time()
+            . '_'
+            . bin2hex(random_bytes(5))
+            . '_'
+            . $safe_name;
+
+        $destination = $upload_dir . $unique_name;
+
+        if (!move_uploaded_file((string) ($local['tmp_name'] ?? ''), $destination)) {
             return $result;
         }
-    }
 
-    // Generate safer unique filename
-    $safe_name = preg_replace(
-        '/[^A-Za-z0-9._-]/',
-        '_',
-        basename($file_name)
-    );
-
-    $unique_name = time()
-        . '_'
-        . bin2hex(random_bytes(5))
-        . '_'
-        . $safe_name;
-
-    $destination = $upload_dir . $unique_name;
-
-    if (!move_uploaded_file($file_tmp, $destination)) {
-        return $result;
+        $stored_path = 'messages/' . $unique_name;
     }
 
     // Determine file type
@@ -149,7 +163,7 @@ function uploadChatFile(): array
         $file_type = 'file';
     }
 
-    $result['file_path'] = 'messages/' . $unique_name;
+    $result['file_path'] = $stored_path;
     $result['file_type'] = $file_type;
 
     return $result;
@@ -204,16 +218,11 @@ if ($role === 'student') {
         $file_path = null;
         $file_type = null;
 
-        // Upload attachment if present
-        if (
-            isset($_FILES['chat_file']) &&
-            $_FILES['chat_file']['error'] !== UPLOAD_ERR_NO_FILE
-        ) {
-            $upload_result = uploadChatFile();
+        // Upload attachment (normal $_FILES on XAMPP or Cloudinary URL on Vercel)
+        $upload_result = uploadChatFile();
 
-            $file_path = $upload_result['file_path'];
-            $file_type = $upload_result['file_type'];
-        }
+        $file_path = $upload_result['file_path'];
+        $file_type = $upload_result['file_type'];
 
         // Only insert if there is a message OR attachment
         if ($msg_content !== '' || !empty($file_path)) {
@@ -369,16 +378,11 @@ else {
         $file_path = null;
         $file_type = null;
 
-        // Upload attachment
-        if (
-            isset($_FILES['chat_file']) &&
-            $_FILES['chat_file']['error'] !== UPLOAD_ERR_NO_FILE
-        ) {
-            $upload_result = uploadChatFile();
+        // Upload attachment (normal $_FILES on XAMPP or Cloudinary URL on Vercel)
+        $upload_result = uploadChatFile();
 
-            $file_path = $upload_result['file_path'];
-            $file_type = $upload_result['file_type'];
-        }
+        $file_path = $upload_result['file_path'];
+        $file_type = $upload_result['file_type'];
 
         // Insert message
         if ($msg_content !== '' || !empty($file_path)) {
@@ -1725,8 +1729,10 @@ else {
                                         <?php
 
                                         $attachment_path =
-                                            '../uploads/'
-                                            . $msg['file_path'];
+                                            ns_media_url(
+                                                $msg['file_path'],
+                                                '../'
+                                            );
 
                                         ?>
 
@@ -2195,6 +2201,7 @@ else {
         );
 
     </script>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 
 </html>

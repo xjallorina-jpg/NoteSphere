@@ -180,7 +180,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'tag' => 'notesphere-security-login',
                         'url' => '/NoteSphere/admin/admin_dashboard.php'
                     ]);
-                    $ch = curl_init('http://127.0.0.1:4000/notify');
+                    $ch = curl_init(ns_push_server_url('notify'));
                     if ($ch !== false) {
                         curl_setopt($ch, CURLOPT_POST, true);
                         curl_setopt($ch, CURLOPT_POSTFIELDS, $pushPayload);

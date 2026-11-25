@@ -8,7 +8,9 @@
 
 // =========================================================
 
-session_start();
+require_once __DIR__ . '/../includes/db_config.php';
+
+/** @var PDO $pdo */
 
 date_default_timezone_set('Asia/Manila');
 
@@ -29,60 +31,6 @@ if (
     header("Location: ../auth/login.php");
 
     exit();
-
-}
-
-// =========================================================
-
-// DATABASE CONNECTION
-
-// =========================================================
-
-$host = 'localhost';
-
-$dbname = '1notesphere_db';
-
-$username = 'root';
-
-$password = '';
-
-try {
-
-    $pdo = new PDO(
-
-        "mysql:host=$host;dbname=$dbname;charset=utf8mb4",
-
-        $username,
-
-        $password
-
-    );
-
-    $pdo->setAttribute(
-
-        PDO::ATTR_ERRMODE,
-
-        PDO::ERRMODE_EXCEPTION
-
-    );
-
-    $pdo->setAttribute(
-
-        PDO::ATTR_DEFAULT_FETCH_MODE,
-
-        PDO::FETCH_ASSOC
-
-    );
-
-} catch (PDOException $e) {
-
-    die(
-
-        "Database Connection Error: " .
-
-        htmlspecialchars($e->getMessage())
-
-    );
 
 }
 
@@ -602,119 +550,68 @@ if (
 
     $file_path = null;
 
-    if (
+    // Files may arrive directly from Cloudinary (Vercel) or as a normal PHP
+    // upload (local XAMPP).
+    $cloudSubmission = ns_cloud_upload_from_request('submission_file');
+    $localSubmission = $_FILES['submission_file'] ?? null;
+    $hasLocalSubmission = is_array($localSubmission)
+        && (int) ($localSubmission['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
 
-        isset($_FILES['submission_file']) &&
-
-        $_FILES['submission_file']['error'] === UPLOAD_ERR_OK
-
-    ) {
+    if ($cloudSubmission !== null || $hasLocalSubmission) {
 
         $allowed_extensions = [
-
-            'pdf',
-
-            'docx',
-
-            'doc',
-
-            'zip',
-
-            'rar',
-
-            'jpg',
-
-            'jpeg',
-
-            'png',
-
-            'txt'
-
+            'pdf', 'docx', 'doc', 'zip', 'rar', 'jpg', 'jpeg', 'png', 'txt'
         ];
 
+        $original_name = $cloudSubmission !== null
+            ? (string) $cloudSubmission['name']
+            : (string) ($localSubmission['name'] ?? '');
+
         $file_extension = strtolower(
-
-            pathinfo(
-
-                $_FILES['submission_file']['name'],
-
-                PATHINFO_EXTENSION
-
-            )
-
+            pathinfo($original_name, PATHINFO_EXTENSION)
         );
 
-        if (
+        if (in_array($file_extension, $allowed_extensions, true)) {
 
-            in_array(
+            if ($cloudSubmission !== null) {
 
-                $file_extension,
+                $file_path = $cloudSubmission['path'];
 
-                $allowed_extensions,
+            } else {
 
-                true
+                $upload_dir = __DIR__ . '/../uploads/submissions/';
 
-            )
+                if (!is_dir($upload_dir)) {
 
-        ) {
+                    mkdir($upload_dir, 0777, true);
 
-            $upload_dir = __DIR__ . '/../uploads/submissions/';
+                }
 
-            if (!is_dir($upload_dir)) {
+                $file_name =
+                    'sub_' .
+                    $ann_id .
+                    '_' .
+                    $student_id .
+                    '_' .
+                    time() .
+                    '.' .
+                    $file_extension;
 
-                mkdir(
+                $target_file = $upload_dir . $file_name;
 
-                    $upload_dir,
+                if (
+                    move_uploaded_file(
+                        (string) ($localSubmission['tmp_name'] ?? ''),
+                        $target_file
+                    )
+                ) {
 
-                    0777,
+                    // Store a project-relative URL in the database, not the XAMPP absolute disk path.
+                    $file_path = 'uploads/submissions/' . $file_name;
 
-                    true
-
-                );
-
+                }
             }
-
-            $file_name =
-
-                'sub_' .
-
-                $ann_id .
-
-                '_' .
-
-                $student_id .
-
-                '_' .
-
-                time() .
-
-                '.' .
-
-                $file_extension;
-
-            $target_file =
-
-                $upload_dir . $file_name;
-
-            if (
-
-                move_uploaded_file(
-
-                    $_FILES['submission_file']['tmp_name'],
-
-                    $target_file
-
-                )
-
-            ) {
-
-                // Store a project-relative URL in the database, not the XAMPP absolute disk path.
-                $file_path = 'uploads/submissions/' . $file_name;
-
-            }
-
         }
-
     }
 
     // =====================================================
@@ -3056,6 +2953,7 @@ function closeAnnPreview(){var m=document.getElementById('annPreviewModal');docu
     }
 
 </script>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 
 </html>

@@ -125,10 +125,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // =========================================================
     // PROFILE PICTURE UPLOAD
     // =========================================================
+    $cloudPic = ns_cloud_upload_from_request('profile_pic');
+    $localPic = $_FILES['profile_pic'] ?? null;
+    $hasLocalPic = is_array($localPic)
+        && (int) ($localPic['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE;
+
     if (
         empty($error_msg) &&
-        isset($_FILES['profile_pic']) &&
-        $_FILES['profile_pic']['error'] !== UPLOAD_ERR_NO_FILE
+        ($cloudPic !== null || $hasLocalPic)
     ) {
 
         // -----------------------------------------------------
@@ -141,9 +145,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         } else {
 
+            $file_name = $cloudPic !== null
+                ? (string) $cloudPic['name']
+                : (string) ($localPic['name'] ?? '');
+
+            $file_ext = strtolower(
+                pathinfo(
+                    $file_name,
+                    PATHINFO_EXTENSION
+                )
+            );
+
+
+            // -------------------------------------------------
+            // ALLOWED IMAGE EXTENSIONS
+            // -------------------------------------------------
+            $allowed_extensions = [
+                'jpg',
+                'jpeg',
+                'png',
+                'webp',
+                'gif',
+                'bmp',
+                'jfif',
+                'heic'
+            ];
+
+
             if (
-                $_FILES['profile_pic']['error'] !==
-                UPLOAD_ERR_OK
+                !in_array(
+                    $file_ext,
+                    $allowed_extensions,
+                    true
+                )
+            ) {
+
+                $error_msg =
+                    "Please select a valid image file.";
+
+            } elseif (
+                $cloudPic === null &&
+                (int) ($localPic['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK
             ) {
 
                 $error_msg =
@@ -151,143 +193,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             } else {
 
-                $file_tmp =
-                    $_FILES['profile_pic']['tmp_name'];
+                try {
 
-                $file_name =
-                    $_FILES['profile_pic']['name'];
+                    $profile_pic_db = $cloudPic !== null
+                        ? $cloudPic['path']
+                        : ns_store_uploaded_file($localPic, 'profiles')['path'];
 
-                $file_ext = strtolower(
-                    pathinfo(
-                        $file_name,
-                        PATHINFO_EXTENSION
-                    )
-                );
-
-
-                // -------------------------------------------------
-                // ALLOWED IMAGE EXTENSIONS
-                // -------------------------------------------------
-                $allowed_extensions = [
-                    'jpg',
-                    'jpeg',
-                    'png',
-                    'webp',
-                    'gif',
-                    'bmp',
-                    'jfif',
-                    'heic'
-                ];
-
-
-                if (
-                    !in_array(
-                        $file_ext,
-                        $allowed_extensions,
-                        true
-                    )
-                ) {
-
-                    $error_msg =
-                        "Please select a valid image file.";
-
-                } else {
 
                     // -------------------------------------------------
-                    // UPLOAD DIRECTORY
+                    // DELETE OLD PROFILE PICTURE
                     // -------------------------------------------------
-                    $upload_dir =
-                        __DIR__ . '/../uploads/';
+                    if (
+                        !empty($current_db_pic) &&
+                        strpos(
+                            $current_db_pic,
+                            'http'
+                        ) !== 0 &&
+                        $current_db_pic !== 'profile'
+                    ) {
 
-                    if (!is_dir($upload_dir)) {
-
-                        if (
-                            !mkdir(
-                                $upload_dir,
-                                0777,
-                                true
-                            )
-                        ) {
-
-                            $error_msg =
-                                "Unable to create the upload folder.";
-                        }
+                        ns_delete_stored_file($current_db_pic);
                     }
 
+                } catch (Throwable $e) {
 
-                    if (empty($error_msg)) {
-
-                        // -------------------------------------------------
-                        // UNIQUE FILE NAME
-                        // -------------------------------------------------
-                        $new_file_name =
-                            'user_' .
-                            $user_id .
-                            '_' .
-                            time() .
-                            '_' .
-                            uniqid() .
-                            '.' .
-                            $file_ext;
-
-                        $destination =
-                            $upload_dir .
-                            $new_file_name;
-
-
-                        // -------------------------------------------------
-                        // MOVE FILE
-                        // -------------------------------------------------
-                        if (
-                            move_uploaded_file(
-                                $file_tmp,
-                                $destination
-                            )
-                        ) {
-
-                            $profile_pic_db =
-                                'uploads/' .
-                                $new_file_name;
-
-
-                            // -------------------------------------------------
-                            // DELETE OLD PROFILE PICTURE
-                            // -------------------------------------------------
-                            if (
-                                !empty($current_db_pic) &&
-                                strpos(
-                                    $current_db_pic,
-                                    'http'
-                                ) !== 0 &&
-                                $current_db_pic !== 'profile'
-                            ) {
-
-                                $old_file_path =
-                                    __DIR__ .
-                                    '/../' .
-                                    ltrim(
-                                        $current_db_pic,
-                                        '/'
-                                    );
-
-                                if (
-                                    file_exists(
-                                        $old_file_path
-                                    )
-                                ) {
-
-                                    @unlink(
-                                        $old_file_path
-                                    );
-                                }
-                            }
-
-                        } else {
-
-                            $error_msg =
-                                "There was a problem uploading the image. Please try again.";
-                        }
-                    }
+                    $error_msg = $e->getMessage();
                 }
             }
         }
@@ -1354,5 +1284,6 @@ if (!empty($user['full_name'])) {
     </div>
 
 </div>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 </html>

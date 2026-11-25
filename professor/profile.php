@@ -45,13 +45,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     // PROFILE PICTURE UPLOAD
     // =====================================================
 
-    if (
-        isset($_FILES['profile_pic']) &&
-        $_FILES['profile_pic']['error'] === UPLOAD_ERR_OK
-    ) {
+    $cloudPic = ns_cloud_upload_from_request('profile_pic');
+    $localPic = $_FILES['profile_pic'] ?? null;
+    $hasLocalPic = is_array($localPic)
+        && (int) ($localPic['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
 
-        $file_tmp = $_FILES['profile_pic']['tmp_name'];
-        $file_name = $_FILES['profile_pic']['name'];
+    if ($cloudPic !== null || $hasLocalPic) {
+
+        $file_name = $cloudPic !== null
+            ? (string) $cloudPic['name']
+            : (string) ($localPic['name'] ?? '');
 
         $file_ext = strtolower(
             pathinfo($file_name, PATHINFO_EXTENSION)
@@ -69,38 +72,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'heic'
         ];
 
-
         if (in_array($file_ext, $allowed_extensions, true)) {
 
-            $upload_dir = '../uploads/';
-
-            if (!is_dir($upload_dir)) {
-                mkdir($upload_dir, 0777, true);
-            }
-
-
-            $new_file_name =
-                'user_' .
-                $user_id .
-                '_' .
-                time() .
-                '_' .
-                uniqid() .
-                '.' .
-                $file_ext;
-
-            $destination =
-                $upload_dir .
-                $new_file_name;
-
-
-            if (move_uploaded_file($file_tmp, $destination)) {
-
-                // Path saved in database
-                $profile_pic_db =
-                    'uploads/' .
-                    $new_file_name;
-
+            try {
+                if ($cloudPic !== null) {
+                    $profile_pic_db = $cloudPic['path'];
+                } else {
+                    $profile_pic_db = ns_store_uploaded_file($localPic, 'profiles')['path'];
+                }
 
                 // =================================================
                 // DELETE OLD PROFILE PICTURE
@@ -111,20 +90,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     strpos($current_db_pic, 'http') !== 0 &&
                     $current_db_pic !== 'profile'
                 ) {
-
-                    $old_file_path =
-                        '../' .
-                        ltrim($current_db_pic, '/');
-
-                    if (file_exists($old_file_path)) {
-                        @unlink($old_file_path);
-                    }
+                    ns_delete_stored_file($current_db_pic);
                 }
 
-            } else {
+            } catch (Throwable $e) {
 
-                $error_msg =
-                    "There was a problem uploading the image. Please try again.";
+                $error_msg = $e->getMessage();
             }
 
         } else {
@@ -818,6 +789,7 @@ if (
     );
 
 </script>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 
 </html>

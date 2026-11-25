@@ -372,6 +372,14 @@ if (!defined('NOTESPHERE_STORAGE_LOADED')) {
             $pathColumns
         );
 
+        // Cloudinary files are not on disk. When the table records their size,
+        // use it so storage quotas still reflect remote attachments.
+        $sizeColumn = in_array('file_size', $columns, true) ? 'file_size' : null;
+
+        if ($sizeColumn !== null) {
+            $quotedPaths[] = '`file_size`';
+        }
+
         $sql = 'SELECT ' . implode(', ', $quotedPaths)
             . ' FROM `' . $table . '`'
             . ' WHERE `' . $ownerColumn . '` = ?';
@@ -387,11 +395,24 @@ if (!defined('NOTESPHERE_STORAGE_LOADED')) {
                 foreach ($pathColumns as $column) {
                     $storedPath = $row[$column] ?? null;
 
-                    if (
-                        !is_string($storedPath)
-                        || trim($storedPath) === ''
-                        || ns_is_web_link($storedPath)
-                    ) {
+                    if (!is_string($storedPath) || trim($storedPath) === '') {
+                        continue;
+                    }
+
+                    if (ns_is_web_link($storedPath)) {
+                        $cloudKey = 'cloud:' . $storedPath;
+
+                        if (
+                            $sizeColumn !== null
+                            && !isset($seenPaths[$cloudKey])
+                        ) {
+                            $seenPaths[$cloudKey] = true;
+                            $usedBytes += max(
+                                0,
+                                (int) ($row[$sizeColumn] ?? 0)
+                            );
+                        }
+
                         continue;
                     }
 

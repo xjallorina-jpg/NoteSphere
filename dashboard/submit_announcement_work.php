@@ -87,10 +87,12 @@ if (!$announcement) {
 // CHECK UPLOADED FILE
 // =========================================================
 
-if (
-    !isset($_FILES['work_file']) ||
-    !is_array($_FILES['work_file'])
-) {
+$cloudFile = ns_cloud_upload_from_request('work_file');
+$localFile = $_FILES['work_file'] ?? null;
+$hasLocalFile = is_array($localFile)
+    && (int)($localFile['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
+
+if ($cloudFile === null && !$hasLocalFile) {
 
     $_SESSION['error_message'] = 'Please select a file to upload.';
 
@@ -102,7 +104,22 @@ if (
     exit();
 }
 
-$file = $_FILES['work_file'];
+// Normalize both upload sources into the shape used by the legacy handler.
+$file = $cloudFile !== null
+    ? [
+        'name' => (string)$cloudFile['name'],
+        'tmp_name' => '',
+        'size' => (int)$cloudFile['size'],
+        'error' => UPLOAD_ERR_OK,
+        'cloud_url' => (string)$cloudFile['path'],
+    ]
+    : [
+        'name' => (string)($localFile['name'] ?? ''),
+        'tmp_name' => (string)($localFile['tmp_name'] ?? ''),
+        'size' => (int)($localFile['size'] ?? 0),
+        'error' => (int)($localFile['error'] ?? UPLOAD_ERR_NO_FILE),
+        'cloud_url' => '',
+    ];
 
 // =========================================================
 // CHECK UPLOAD ERROR
@@ -219,7 +236,7 @@ if ($file_size > $max_file_size) {
 // CHECK REAL UPLOADED FILE
 // =========================================================
 
-if (!is_uploaded_file($tmp_name)) {
+if (empty($file['cloud_url']) && !is_uploaded_file($tmp_name)) {
 
     $_SESSION['error_message'] =
         'Invalid file upload.';
@@ -238,7 +255,7 @@ if (!is_uploaded_file($tmp_name)) {
 
 $upload_dir = dirname(__DIR__) . DIRECTORY_SEPARATOR . 'uploads';
 
-if (!is_dir($upload_dir)) {
+if (empty($file['cloud_url']) && !is_dir($upload_dir)) {
 
     if (!mkdir($upload_dir, 0755, true)) {
 
@@ -258,22 +275,31 @@ if (!is_dir($upload_dir)) {
 // GENERATE SAFE UNIQUE FILE NAME
 // =========================================================
 
-$random_name = bin2hex(random_bytes(16));
+if (!empty($file['cloud_url'])) {
 
-$new_filename =
-    'submission_' .
-    $user_id .
-    '_' .
-    $announcement_id .
-    '_' .
-    $random_name .
-    '.' .
-    $extension;
+    // Cloudinary already generated a unique public URL for this file.
+    $new_filename = $file['cloud_url'];
+    $destination = '';
 
-$destination =
-    $upload_dir .
-    DIRECTORY_SEPARATOR .
-    $new_filename;
+} else {
+
+    $random_name = bin2hex(random_bytes(16));
+
+    $new_filename =
+        'submission_' .
+        $user_id .
+        '_' .
+        $announcement_id .
+        '_' .
+        $random_name .
+        '.' .
+        $extension;
+
+    $destination =
+        $upload_dir .
+        DIRECTORY_SEPARATOR .
+        $new_filename;
+}
 
 // =========================================================
 // CHECK EXISTING SUBMISSION
@@ -302,7 +328,7 @@ $existing_submission = $existing_stmt->fetch(PDO::FETCH_ASSOC);
 // MOVE FILE TO UPLOAD DIRECTORY
 // =========================================================
 
-if (!move_uploaded_file($tmp_name, $destination)) {
+if (empty($file['cloud_url']) && !move_uploaded_file($tmp_name, $destination)) {
 
     $_SESSION['error_message'] =
         'The file could not be saved on the server.';
@@ -347,8 +373,9 @@ try {
                 basename($old_file);
 
             if (
+                !ns_is_remote_file($old_file) &&
                 is_file($old_file_path) &&
-                realpath($old_file_path) !== realpath($destination)
+                ($destination === '' || realpath($old_file_path) !== realpath($destination))
             ) {
                 @unlink($old_file_path);
             }
@@ -445,7 +472,7 @@ try {
     }
 
     // Delete uploaded file if database failed
-    if (is_file($destination)) {
+    if ($destination !== '' && is_file($destination)) {
         @unlink($destination);
     }
 

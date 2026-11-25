@@ -1,8 +1,21 @@
 <?php
 // Serve an attachment inline for browser-native preview.
 // Used by the Preview button; Download button uses direct file link.
+require_once __DIR__ . '/../includes/cloudinary.php';
+
 $path = isset($_GET['file']) ? trim($_GET['file']) : '';
 if ($path === '') { http_response_code(400); exit('No file'); }
+
+// Cloudinary assets are already browser-viewable; redirect to the validated
+// HTTPS URL rather than trying to read a local file.
+if (ns_is_remote_file($path)) {
+    $remote = ns_validate_cloudinary_url($path);
+    if ($remote === null) { http_response_code(404); exit('Not found'); }
+    header('X-Content-Type-Options: nosniff');
+    header('Location: ' . $remote, true, 302);
+    exit();
+}
+
 $path = str_replace('\\','/',$path);
 $path = preg_replace('~^(?:\./|(?:\.\./))+~','',$path);
 $full = __DIR__ . '/../' . ltrim($path,'/');

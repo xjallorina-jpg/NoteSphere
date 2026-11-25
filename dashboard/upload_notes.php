@@ -58,16 +58,22 @@ function getStudentUsedStorage(PDO $conn, int $userId, string $root): int {
     $stmt = $conn->prepare('SELECT file_path, thumbnail FROM notes WHERE user_id = ?');
     $stmt->execute([$userId]);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) foreach (['file_path','thumbnail'] as $col) {
-        $full = resolveNoteFile((string)($row[$col] ?? ''),$root);
+        $path = (string)($row[$col] ?? '');
+        // Cloudinary assets are not on this filesystem; their size is tracked
+        // through note_attachments below when available.
+        if (ns_is_remote_file($path)) continue;
+        $full = resolveNoteFile($path,$root);
         if ($full === null || isset($unique[$full])) continue;
         $unique[$full] = true; clearstatcache(true,$full); $size = filesize($full);
         if ($size !== false) $total += (int)$size;
     }
     // The migration creates this table. If it is missing, surface a clear setup error rather than silently excluding attachment storage.
-    $stmt = $conn->prepare('SELECT file_path FROM note_attachments WHERE user_id = ?');
+    $stmt = $conn->prepare('SELECT file_path, file_size FROM note_attachments WHERE user_id = ?');
     $stmt->execute([$userId]);
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-        $full = resolveNoteFile((string)($row['file_path'] ?? ''),$root);
+        $path = (string)($row['file_path'] ?? '');
+        if (ns_is_remote_file($path)) { $total += max(0,(int)($row['file_size'] ?? 0)); continue; }
+        $full = resolveNoteFile($path,$root);
         if ($full === null || isset($unique[$full])) continue;
         $unique[$full] = true; clearstatcache(true,$full); $size = filesize($full);
         if ($size !== false) $total += (int)$size;
@@ -123,33 +129,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $savedPaths=[]; $savedAbsolutePaths=[]; $attachmentPaths=[]; $transactionStarted=false;
         try {
             $s=refreshStudentStorage($conn,$userId,$projectRoot); $storageLimitBytes=$s['limit']; $usedStorageBytes=$s['used']; $remainingStorageBytes=$s['remaining'];
-            if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory,0755,true) && !is_dir($uploadDirectory)) throw new RuntimeException('Unable to create the notes upload directory.');
-            if (!is_writable($uploadDirectory)) throw new RuntimeException('The notes upload directory is not writable.');
+            if (!ns_cloudinary_enabled()) {
+                if (!is_dir($uploadDirectory) && !mkdir($uploadDirectory,0755,true) && !is_dir($uploadDirectory)) throw new RuntimeException('Unable to create the notes upload directory.');
+                if (!is_writable($uploadDirectory)) throw new RuntimeException('The notes upload directory is not writable.');
+            }
             $noteContent=null; $mainPath=null; $totalIncomingBytes=0; $uploadedItems=[];
             if ($activeType === 'created') {
                 if ($content==='') throw new RuntimeException('Please write something in your note before saving.');
                 $noteContent=$content;
                 $plainText=$title.PHP_EOL.str_repeat('=',min(60,max(1,mb_strlen($title)))).PHP_EOL.PHP_EOL.$content;
                 $totalIncomingBytes=strlen($plainText); ensureStorageAvailable($totalIncomingBytes,$remainingStorageBytes);
-                $name='created_'.$userId.'_'.bin2hex(random_bytes(12)).'.txt'; $mainPath=$uploadRelativeDirectory.'/'.$name; $absolute=$uploadDirectory.DIRECTORY_SEPARATOR.$name;
-                if (file_put_contents($absolute,$plainText,LOCK_EX)===false) throw new RuntimeException('Unable to save your note. Please try again.');
-                $savedPaths[]=$mainPath; $savedAbsolutePaths[]=$absolute;
+                $name='created_'.$userId.'_'.bin2hex(random_bytes(12)).'.txt';
+                $mainPath=ns_store_text_file($plainText,$name,'notes');
+                $savedPaths[]=$mainPath;
+                if (!ns_is_remote_file($mainPath)) $savedAbsolutePaths[]=$uploadDirectory.DIRECTORY_SEPARATOR.basename($mainPath);
             } else {
                 // Existing single-file field remains supported. A photo-only submission may use the multiple-photo picker instead.
+                $cloudSingle=ns_cloud_upload_from_request('note_file');
+                $cloudImages=ns_cloud_uploads_from_request('note_images');
                 $single=$_FILES['note_file'] ?? null;
-                $hasSingle=is_array($single) && (int)($single['error'] ?? UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_NO_FILE;
+                $hasSingle=$cloudSingle!==null || (is_array($single) && (int)($single['error'] ?? UPLOAD_ERR_NO_FILE)!==UPLOAD_ERR_NO_FILE);
                 $images=normalizeMultiFiles($_FILES['note_images'] ?? []);
                 $images=array_values(array_filter($images,fn($f)=>$f['error']!==UPLOAD_ERR_NO_FILE));
-                if (count($images) > 30) throw new RuntimeException('You can upload a maximum of 30 images per note.');
-                if (!$hasSingle && !$images) throw new RuntimeException('Please choose a file or add at least one photo.');
-                if ($hasSingle) {
+                if (count($images)+count($cloudImages) > 30) throw new RuntimeException('You can upload a maximum of 30 images per note.');
+                if (!$hasSingle && !$images && !$cloudImages) throw new RuntimeException('Please choose a file or add at least one photo.');
+                if ($cloudSingle !== null) {
+                    $original=(string)$cloudSingle['name']; $size=(int)$cloudSingle['size']; $ext=strtolower(pathinfo($original,PATHINFO_EXTENSION));
+                    if ($size<=0) throw new RuntimeException('The selected file is empty.');
+                    if ($size > 1024 * 1024 * 1024) throw new RuntimeException('File too large. Max 1 GB per file.');
+                    if (!in_array($ext,$allowedExtensions,true)) throw new RuntimeException('This file type is not supported.');
+                    $uploadedItems[]=['cloud'=>true,'path'=>$cloudSingle['path'],'original'=>$original,'size'=>$size,'ext'=>$ext,'mime'=>(string)$cloudSingle['mime'],'main'=>true]; $totalIncomingBytes += $size;
+                } elseif (is_array($single) && $hasSingle) {
                     $code=(int)($single['error'] ?? UPLOAD_ERR_NO_FILE); if ($code!==UPLOAD_ERR_OK) throw new RuntimeException(uploadErrorMessage($code));
                     $tmp=(string)($single['tmp_name'] ?? ''); $original=(string)($single['name'] ?? ''); $size=(int)($single['size'] ?? 0); $ext=strtolower(pathinfo($original,PATHINFO_EXTENSION));
                     if ($tmp==='' || !is_uploaded_file($tmp)) throw new RuntimeException('The uploaded file could not be verified.');
                     if ($size<=0) throw new RuntimeException('The selected file is empty.');
                     if ($size > 1024 * 1024 * 1024) throw new RuntimeException('File too large. Max 1 GB per file.');
                     if (!in_array($ext,$allowedExtensions,true)) throw new RuntimeException('This file type is not supported.');
-                    $uploadedItems[]=['tmp'=>$tmp,'original'=>$original,'size'=>$size,'ext'=>$ext,'main'=>true]; $totalIncomingBytes += $size;
+                    $uploadedItems[]=['cloud'=>false,'tmp'=>$tmp,'original'=>$original,'size'=>$size,'ext'=>$ext,'main'=>true]; $totalIncomingBytes += $size;
+                }
+                foreach ($cloudImages as $img) {
+                    $original=(string)$img['name']; $size=(int)$img['size']; $ext=strtolower(pathinfo($original,PATHINFO_EXTENSION));
+                    if ($size<=0) throw new RuntimeException('One of the selected photos is empty.');
+                    if ($size > 1024 * 1024 * 1024) throw new RuntimeException('Photo too large. Max 1 GB per file.');
+                    if (!in_array($ext,$imageExtensions,true)) throw new RuntimeException('Only JPG, JPEG, PNG, GIF, and WEBP files are accepted in the photo picker.');
+                    $uploadedItems[]=['cloud'=>true,'path'=>$img['path'],'original'=>$original,'size'=>$size,'ext'=>$ext,'mime'=>(string)$img['mime'],'main'=>false]; $totalIncomingBytes += $size;
                 }
                 foreach ($images as $idx=>$img) {
                     if ($img['error']!==UPLOAD_ERR_OK) throw new RuntimeException(uploadErrorMessage($img['error']));
@@ -158,15 +182,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($size<=0) throw new RuntimeException('One of the selected photos is empty.');
                     if ($size > 1024 * 1024 * 1024) throw new RuntimeException('Photo too large. Max 1 GB per file.');
                     if (!in_array($ext,$imageExtensions,true)) throw new RuntimeException('Only JPG, JPEG, PNG, GIF, and WEBP files are accepted in the photo picker.');
-                    $uploadedItems[]=['tmp'=>$tmp,'original'=>$original,'size'=>$size,'ext'=>$ext,'main'=>!$hasSingle && $idx===0]; $totalIncomingBytes += $size;
+                    $uploadedItems[]=['cloud'=>false,'tmp'=>$tmp,'original'=>$original,'size'=>$size,'ext'=>$ext,'main'=>false]; $totalIncomingBytes += $size;
                 }
                 ensureStorageAvailable($totalIncomingBytes,$remainingStorageBytes);
                 foreach ($uploadedItems as $item) {
+                    if (!empty($item['cloud'])) {
+                        $relative=(string)$item['path'];
+                        $savedPaths[]=$relative;
+                        if (!empty($item['main'])) $mainPath=$relative;
+                        else $attachmentPaths[]=['path'=>$relative,'original'=>$item['original'],'mime'=>$item['mime']!==''?$item['mime']:'application/octet-stream','size'=>(int)$item['size']];
+                        continue;
+                    }
                     $fileName='upload_'.$userId.'_'.bin2hex(random_bytes(12)).'.'.$item['ext'];
                     $relative=$uploadRelativeDirectory.'/'.$fileName; $absolute=$uploadDirectory.DIRECTORY_SEPARATOR.$fileName;
                     if (!move_uploaded_file($item['tmp'],$absolute)) throw new RuntimeException('Unable to save one of the selected files.');
                     $savedPaths[]=$relative; $savedAbsolutePaths[]=$absolute;
-                    if ($item['main']) $mainPath=$relative;
+                    if (!empty($item['main'])) $mainPath=$relative;
                     else $attachmentPaths[]=['path'=>$relative,'original'=>$item['original'],'mime'=>function_exists('mime_content_type') ? (mime_content_type($absolute) ?: 'application/octet-stream') : 'application/octet-stream','size'=>(int)filesize($absolute)];
                 }
                 if ($mainPath===null && $savedPaths) $mainPath=$savedPaths[0];
@@ -257,6 +288,7 @@ $storagePercent=$storageLimitBytes>0?min(100,($usedStorageBytes/$storageLimitByt
   <div class="actions"><a class="btn btn-secondary" href="<?=h($backUrl)?>">Cancel</a><button class="btn btn-primary" type="submit" id="submitButton" <?=$storageLoaded?'':'disabled'?>>Submit Note for Approval</button></div>
  </form>
 </main>
+<script src="../assets/cloudinary_upload.js"></script>
 <script>
 (function(){'use strict';
  const urlParams = new URLSearchParams(window.location.search);
@@ -304,7 +336,7 @@ $storagePercent=$storageLimitBytes>0?min(100,($usedStorageBytes/$storageLimitByt
  function addPhotoFiles(fileList){const incoming=Array.from(fileList||[]);for(const f of incoming){if(!f.type.startsWith('image/')){alert('Please select image files only in the photo picker.');continue;}if(photos.length>=30){alert('You can upload a maximum of 30 images per note.');break;}const duplicate=photos.some(p=>p.name===f.name&&p.size===f.size&&p.lastModified===f.lastModified);if(!duplicate)photos.push(f);}syncFiles();}
  methods.forEach(i=>i.addEventListener('change',updateMethod));fileInput.addEventListener('change',()=>{fileName.textContent=fileInput.files&&fileInput.files.length?'Selected main file: '+fileInput.files[0].name:'No main file selected.';});content.addEventListener('input',updateCount);
  addBtn.addEventListener('click',()=>galleryPicker.click());cameraBtn.addEventListener('click',()=>cameraPicker.click());galleryPicker.addEventListener('change',()=>{addPhotoFiles(galleryPicker.files);galleryPicker.value='';});cameraPicker.addEventListener('change',()=>{addPhotoFiles(cameraPicker.files);cameraPicker.value='';});
- form.addEventListener('submit',e=>{if(method()==='upload'&&fileInput.files.length===0&&photos.length===0){e.preventDefault();alert('Please choose a main file or add at least one photo.');fileInput.focus();return;}if(method()==='created'&&content.value.trim()===''){e.preventDefault();alert('Please write your note before submitting.');content.focus();return;}submit.disabled=true;submit.textContent='Submitting...';});
+ form.addEventListener('submit',e=>{const cloudReady=form.dataset.nsCloudReady==='1'||!!form.querySelector('input[name="note_file__url"]');if(method()==='upload'&&!cloudReady&&fileInput.files.length===0&&photos.length===0){e.preventDefault();alert('Please choose a main file or add at least one photo.');fileInput.focus();return;}if(method()==='created'&&content.value.trim()===''){e.preventDefault();alert('Please write your note before submitting.');content.focus();return;}submit.disabled=true;submit.textContent='Submitting...';});
  updateMethod();updateCount();renderPhotos();
 })();
 </script>

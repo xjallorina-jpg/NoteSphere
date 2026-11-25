@@ -69,6 +69,21 @@ if ($file_path === '') {
     exit('No file is attached to this note.');
 }
 
+// Cloudinary files are remote HTTPS URLs; redirect the browser instead of
+// looking for a local file that does not exist on Vercel.
+if (ns_is_remote_file($file_path)) {
+    $remote_url = ns_validate_cloudinary_url($file_path);
+
+    if ($remote_url === null) {
+        http_response_code(404);
+        exit('The note file could not be found on the server.');
+    }
+
+    header('X-Content-Type-Options: nosniff');
+    header('Location: ' . $remote_url, true, 302);
+    exit;
+}
+
 // =========================================================
 // FIND FILE
 // =========================================================

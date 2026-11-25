@@ -4,9 +4,11 @@
  *
  * This lets phones using an ngrok/tunnel URL reach the push server without a
  * separate tunnel or browser CORS problems. The push server itself still runs
- * on http://127.0.0.1:4000 on the NoteSphere computer.
+ * at PUSH_SERVER_URL (default http://127.0.0.1:4000 locally). On Vercel the
+ * push server must be deployed separately and its public URL configured.
  */
 declare(strict_types=1);
+require_once __DIR__ . '/../includes/env.php';
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 
@@ -28,7 +30,14 @@ if ($method !== 'GET' && $method !== 'POST') {
 $rawBody = file_get_contents('php://input');
 if ($rawBody === false) $rawBody = '';
 
-$ch = curl_init('http://127.0.0.1:4000/' . $endpoint);
+$pushBase = ns_push_server_url();
+if ($pushBase === '') {
+    http_response_code(502);
+    echo json_encode(['ok' => false, 'error' => 'The push server is not configured.']);
+    exit;
+}
+
+$ch = curl_init($pushBase . '/' . $endpoint);
 if ($ch === false) {
     http_response_code(502);
     echo json_encode(['ok' => false, 'error' => 'The push server is not available.']);

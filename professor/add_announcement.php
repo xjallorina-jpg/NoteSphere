@@ -110,8 +110,7 @@ function ns_render_announcement_attachment(array $attachment): string
     $storedPath = trim((string) ($attachment['file_path'] ?? ''));
     if ($storedPath === '') return '';
 
-    $url = '../' . ltrim(str_replace('\\', '/', $storedPath), '/');
-    $url = e($url);
+    $url = e(ns_media_url($storedPath));
     $name = (string) ($attachment['original_name'] ?? basename($storedPath));
     $safeName = e($name);
     $extension = strtolower(pathinfo($storedPath, PATHINFO_EXTENSION));
@@ -139,6 +138,11 @@ function deleteAnnouncementFile($relativePath)
     }
 
     $relativePath = str_replace('\\', '/', trim($relativePath));
+
+    // Cloudinary assets are not stored on the local filesystem.
+    if (ns_is_remote_file($relativePath)) {
+        return;
+    }
 
     $filename = basename($relativePath);
 
@@ -402,7 +406,13 @@ function ns_validate_announcement_upload($file)
     }
 
     $file_size = (int) ($file['size'] ?? 0);
-    if ($file_size <= 0 || !is_uploaded_file($file['tmp_name'])) {
+    $isCloud = !empty($file['cloud_url']);
+
+    if ($file_size <= 0) {
+        throw new Exception("The attachment is empty or invalid.");
+    }
+
+    if (!$isCloud && !is_uploaded_file($file['tmp_name'])) {
         throw new Exception("The attachment is empty or invalid.");
     }
     if ($file_size > 1024 * 1024 * 1024) {
@@ -432,6 +442,30 @@ function ns_validate_announcement_upload($file)
 /** Normalize both single-file and multiple-file HTML upload arrays. */
 function ns_get_uploaded_announcement_files($fieldName = 'attachments')
 {
+    $files = [];
+
+    // Files already uploaded to Cloudinary by the browser.
+    $cloudFiles = ns_cloud_uploads_from_request($fieldName);
+
+    if (!$cloudFiles && $fieldName === 'attachments') {
+        $cloudFiles = ns_cloud_uploads_from_request('attachment');
+    }
+
+    foreach ($cloudFiles as $cloud) {
+        $files[] = [
+            'name' => $cloud['name'],
+            'type' => $cloud['mime'],
+            'tmp_name' => '',
+            'error' => UPLOAD_ERR_OK,
+            'size' => $cloud['size'],
+            'cloud_url' => $cloud['path'],
+        ];
+    }
+
+    if ($files) {
+        return $files;
+    }
+
     if (!isset($_FILES[$fieldName])) {
         // Backward compatibility with the old single-file input name.
         if ($fieldName === 'attachments' && isset($_FILES['attachment'])) {
@@ -443,8 +477,6 @@ function ns_get_uploaded_announcement_files($fieldName = 'attachments')
 
     $f = $_FILES[$fieldName];
     if (!is_array($f) || !isset($f['name'])) return [];
-
-    $files = [];
     if (is_array($f['name'])) {
         $count = count($f['name']);
         for ($i = 0; $i < $count; $i++) {
@@ -519,18 +551,27 @@ function ns_save_announcement_uploads(PDO $conn, int $profId, array $files, stri
                 throw new Exception("The system's configured storage capacity has been reached. The attachment was not uploaded.");
             }
 
-            $safeExt = $info['extension'] !== '' ? '.' . $info['extension'] : '';
-            $safeName = 'announcement_' . $profId . '_' . date('Ymd_His') . '_' . bin2hex(random_bytes(8)) . $safeExt;
-            $destination = rtrim($uploadDir, '/\\') . DIRECTORY_SEPARATOR . $safeName;
-            if (!move_uploaded_file($file['tmp_name'], $destination)) {
-                throw new Exception("Failed to save uploaded file: " . $info['original_name']);
+            if (!empty($file['cloud_url'])) {
+                $saved[] = [
+                    'file_path' => $file['cloud_url'],
+                    'physical_path' => null,
+                    'original_name' => $info['original_name'],
+                    'size' => $info['size']
+                ];
+            } else {
+                $safeExt = $info['extension'] !== '' ? '.' . $info['extension'] : '';
+                $safeName = 'announcement_' . $profId . '_' . date('Ymd_His') . '_' . bin2hex(random_bytes(8)) . $safeExt;
+                $destination = rtrim($uploadDir, '/\\') . DIRECTORY_SEPARATOR . $safeName;
+                if (!move_uploaded_file($file['tmp_name'], $destination)) {
+                    throw new Exception("Failed to save uploaded file: " . $info['original_name']);
+                }
+                $saved[] = [
+                    'file_path' => 'uploads/announcements/' . $safeName,
+                    'physical_path' => $destination,
+                    'original_name' => $info['original_name'],
+                    'size' => $info['size']
+                ];
             }
-            $saved[] = [
-                'file_path' => 'uploads/announcements/' . $safeName,
-                'physical_path' => $destination,
-                'original_name' => $info['original_name'],
-                'size' => $info['size']
-            ];
             $batchProfessorBytes += $info['size'];
             $batchSystemBytes += $info['size'];
         }
@@ -4316,5 +4357,6 @@ Swal.fire({
 <?php endif; ?>
 
 </script>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 </html>

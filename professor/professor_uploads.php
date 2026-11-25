@@ -15,47 +15,54 @@ $message = "";
 
 // Process the upload
 if ($_SERVER['REQUEST_METHOD'] == 'POST') {
-    if (isset($_FILES['note_file'])) {
-        $title = trim($_POST['title']);
-        $description = trim($_POST['description']);
-        $user_id = $_SESSION['user_id'];
-        
-        $upload_dir = realpath(__DIR__ . '/../') . DIRECTORY_SEPARATOR . 'uploads' . DIRECTORY_SEPARATOR;
-        
-        if (!is_dir($upload_dir)) { mkdir($upload_dir, 0777, true); }
-        
+    $title = trim((string)($_POST['title'] ?? ''));
+    $description = trim((string)($_POST['description'] ?? ''));
+    $user_id = (int) $_SESSION['user_id'];
+
+    // Files may arrive either as a normal $_FILES upload (local XAMPP) or as
+    // an already-uploaded Cloudinary URL (Vercel).
+    $cloudFile = ns_cloud_upload_from_request('note_file');
+    $cloudThumb = ns_cloud_upload_from_request('thumbnail');
+    $single = $_FILES['note_file'] ?? null;
+    $thumb = $_FILES['thumbnail'] ?? null;
+
+    $hasCloud = $cloudFile !== null;
+    $hasLocal = is_array($single) && (int)($single['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK;
+
+    if ($title === '') {
+        $message = "❌ Please enter a title.";
+    } elseif (!$hasCloud && !$hasLocal) {
+        $message = "❌ Please choose a file to upload.";
+    } else {
         // Limit: 1 GB per file
         $maxBytes = 1024 * 1024 * 1024;
-        if ($_FILES['note_file']['size'] > $maxBytes) {
+        $fileSize = $hasCloud ? (int)$cloudFile['size'] : (int)($single['size'] ?? 0);
+
+        if ($fileSize > $maxBytes) {
             $message = "❌ File too large. Max 1 GB per file.";
-        } elseif ($_FILES['note_file']['error'] === UPLOAD_ERR_OK) {
-            
-            $file_name = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', basename($_FILES['note_file']['name']));
-            
-            if (move_uploaded_file($_FILES['note_file']['tmp_name'], $upload_dir . $file_name)) {
-                
-                // Handle optional thumbnail
-                $thumb_name = "";
-                if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
-                    $thumb_name = 'thumb_' . time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', basename($_FILES['thumbnail']['name']));
-                    move_uploaded_file($_FILES['thumbnail']['tmp_name'], $upload_dir . $thumb_name);
-                }
-                
-                try {
-                    // Deretso approved na agad dahil professor ang nag-upload
-                    $sql = "INSERT INTO notes (user_id, title, description, file_path, thumbnail, status) VALUES (?, ?, ?, ?, ?, 'approved')";
-                    $stmt = $conn->prepare($sql);
-                    $stmt->execute([$user_id, $title, $description, $file_name, $thumb_name]);
-                    
-                    $message = "✅ Success! Resource published successfully.";
-                } catch (PDOException $e) {
-                    $message = "❌ Database Error: " . $e->getMessage();
-                }
-            } else {
-                $message = "❌ Fatal Error: Hindi ma-move ang file. Check permissions.";
-            }
         } else {
-            $message = "❌ Error in file upload. Pakisiguradong hindi lalampas sa limit.";
+            try {
+                $storedFile = $hasCloud
+                    ? $cloudFile['path']
+                    : ns_store_uploaded_file($single, 'notes')['path'];
+
+                $storedThumb = '';
+                if ($cloudThumb !== null) {
+                    $storedThumb = $cloudThumb['path'];
+                } elseif (is_array($thumb) && (int)($thumb['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_OK) {
+                    $storedThumb = ns_store_uploaded_file($thumb, 'notes/thumbnails')['path'];
+                }
+
+                // Deretso approved na agad dahil professor ang nag-upload
+                $sql = "INSERT INTO notes (user_id, title, description, file_path, thumbnail, status) VALUES (?, ?, ?, ?, ?, 'approved')";
+                $stmt = $conn->prepare($sql);
+                $stmt->execute([$user_id, $title, $description, $storedFile, $storedThumb]);
+
+                $message = "✅ Success! Resource published successfully.";
+            } catch (Throwable $e) {
+                error_log('NoteSphere professor upload failed: ' . $e->getMessage());
+                $message = "❌ " . $e->getMessage();
+            }
         }
     }
 }
@@ -114,5 +121,6 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         </form>
         <a href="professor_dashboard.php" class="cancel-btn">CANCEL OPERATION</a>
     </div>
+<script src="../assets/cloudinary_upload.js"></script>
 </body>
 </html>

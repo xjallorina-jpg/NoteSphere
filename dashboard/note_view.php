@@ -42,12 +42,12 @@ body{font-family:sans-serif;padding:20px;background:#111;color:#fff;}
 $ext = strtolower(pathinfo($note['file_path'] ?? '', PATHINFO_EXTENSION));
 $isImageFile = in_array($ext, ['jpg','jpeg','png','gif','webp']);
 if (!empty($note['file_path']) && !$isImageFile): ?>
-<p><a href="../<?=htmlspecialchars($note['file_path'])?>" target="_blank" style="color:#39FF14;">Open File</a></p>
+<p><a href="<?=htmlspecialchars(ns_media_url($note['file_path']))?>" target="_blank" style="color:#39FF14;">Open File</a></p>
 <?php endif; ?>
 
 <?php if (count($images) > 0): ?>
 <div class="gallery">
-  <img id="mainImg" src="../<?=htmlspecialchars(ltrim(str_replace('\\','/', (string)$images[0]['file_path']), '/'))?>" alt="photo">
+  <img id="mainImg" src="<?=htmlspecialchars(ns_media_url($images[0]['file_path']))?>" alt="photo">
   <?php if (count($images) > 1): ?>
   <button class="nav prev" onclick="prev()">&#10094;</button>
   <button class="nav next" onclick="next()">&#10095;</button>
@@ -55,11 +55,11 @@ if (!empty($note['file_path']) && !$isImageFile): ?>
 </div>
 <div class="thumbs" id="thumbs">
   <?php foreach ($images as $i => $img): ?>
-  <img src="../<?=htmlspecialchars(ltrim(str_replace('\\','/', (string)$img['file_path']), '/'))?>" data-idx="<?=$i?>" onclick="show(<?=$i?>)" class="<?=$i===0?'active':''?>">
+  <img src="<?=htmlspecialchars(ns_media_url($img['file_path']))?>" data-idx="<?=$i?>" onclick="show(<?=$i?>)" class="<?=$i===0?'active':''?>">
   <?php endforeach; ?>
 </div>
 <script>
-const imgs = <?=json_encode(array_map(function($a){return '../'.ltrim(str_replace('\\','/', (string)$a['file_path']), '/');}, $images))?>;
+const imgs = <?=json_encode(array_map(function($a){return ns_media_url($a['file_path']);}, $images))?>;
 let idx = 0;
 function show(i){ idx=i; document.getElementById('mainImg').src=imgs[idx]; document.querySelectorAll('#thumbs img').forEach((t,j)=>t.classList.toggle('active',j===idx)); }
 function next(){ show((idx+1)%imgs.length); }

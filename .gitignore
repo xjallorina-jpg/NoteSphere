@@ -1,9 +1,16 @@
 # Secrets / local config
-includes/mail_config.php
-includes/db_config.php
+# db_config.php and mail_config.php are env-driven and safe to commit.
 .env
 .env.*
+!.env.example
 *.env
+
+# Local Vercel build output
+.vercel/
+
+# Push-server runtime secrets
+push-server/vapid.json
+push-server/subscriptions.json
 
 # Dependencies
 node_modules/
